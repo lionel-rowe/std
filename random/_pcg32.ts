@@ -48,6 +48,15 @@ abstract class Prng32 {
   }
 }
 
+/** u64 variables used for `advance` */
+const vars = new BigUint64Array(5) as { [Index in VarIndex]: bigint };
+type VarIndex = number & { readonly AdvIndex: unique symbol };
+const ACC_MULT = 0 as VarIndex;
+const ACC_PLUS = 1 as VarIndex;
+const CUR_MULT = 2 as VarIndex;
+const CUR_PLUS = 3 as VarIndex;
+const DELTA = 4 as VarIndex;
+
 /**
  * Internal PCG32 implementation, used by both the public seeded random
  * function and the seed generation algorithm.
@@ -70,13 +79,13 @@ export class Pcg32 extends Prng32 {
   get state() {
     return this.#state[0]!;
   }
-  protected set state(val) {
+  set state(val) {
     this.#state[0] = val;
   }
   get increment() {
     return this.#state[1]!;
   }
-  protected set increment(val) {
+  set #increment(val: bigint) {
     // https://www.pcg-random.org/posts/critiquing-pcg-streams.html#changing-the-increment
     // > Increments have just one rule: they must be odd.
     // We OR the increment with 1 upon setting to ensure this.
@@ -100,12 +109,14 @@ export class Pcg32 extends Prng32 {
   constructor({ state, increment }: { state: bigint; increment: bigint });
   constructor(arg: bigint | { state: bigint; increment: bigint }) {
     if (typeof arg === "bigint") {
-      return Pcg32.#seedFromUint64(arg);
+      const pcg = Pcg32.#seedFromUint64(arg);
+      if (new.target === Pcg32) return pcg;
+      arg = pcg;
     }
 
     super();
     this.state = arg.state;
-    this.increment = arg.increment;
+    this.#increment = arg.increment;
   }
 
   /** @returns The next pseudo-random 32-bit integer. */
@@ -131,6 +142,37 @@ export class Pcg32 extends Prng32 {
     const left = BigInt.asUintN(32, n << (-rot & 31n));
     const right = n >> rot;
     return left | right;
+  }
+
+  /**
+   * Multi-step advance (jump-ahead, jump-back)
+   * @param delta The number of steps to advance. Negative values are allowed.
+   *
+   * See https://github.com/rust-random/rand/blob/f7bbcca/rand_pcg/src/pcg64.rs#L60
+   */
+  advance(delta: bigint) {
+    vars[ACC_MULT] = 1n;
+    vars[ACC_PLUS] = 0n;
+    vars[CUR_MULT] = Pcg32.MULTIPLIER;
+    vars[CUR_PLUS] = this.increment;
+
+    // If a negative value was passed, it gets wrapped to positive, giving the correct result
+    vars[DELTA] = delta;
+
+    while (vars[DELTA] > 0n) {
+      if (vars[DELTA] & 1n) {
+        vars[ACC_MULT] *= vars[CUR_MULT];
+        vars[ACC_PLUS] = vars[ACC_PLUS] * vars[CUR_MULT] + vars[CUR_PLUS];
+      }
+      vars[CUR_PLUS] = (vars[CUR_MULT] + 1n) * vars[CUR_PLUS];
+      vars[CUR_MULT] *= vars[CUR_MULT];
+      // Floor-halving each iteration, max 64 iterations for initial wrapped delta in [2^63, 2^64)
+      vars[DELTA] /= 2n;
+    }
+
+    this.state = this.state * vars[ACC_MULT] + vars[ACC_PLUS];
+
+    return this;
   }
 
   static #seedFromUint64(seed: bigint): Pcg32 {

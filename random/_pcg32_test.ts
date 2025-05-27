@@ -285,3 +285,47 @@ Deno.test("getRandomValues() can be used to generate the same arbitrary numeric 
     }
   });
 });
+
+Deno.test("Pcg32 allows subclassing with both of its constructor signatures", async (t) => {
+  class MyPcg32 extends Pcg32 {}
+
+  await t.step("bigint seed", () => {
+    const arg = 0n;
+    const pcg = new MyPcg32(arg);
+    assert(pcg instanceof MyPcg32);
+    assert(pcg instanceof Pcg32);
+    assertEquals(pcg.nextUint32(), new Pcg32(arg).nextUint32());
+  });
+
+  await t.step("state + increment", () => {
+    const arg = {
+      state: 2513718859009009757n,
+      increment: 5756781935050635005n,
+    };
+    const pcg = new MyPcg32(arg);
+    assert(pcg instanceof MyPcg32);
+    assert(pcg instanceof Pcg32);
+    assertEquals(pcg.nextUint32(), new Pcg32(arg).nextUint32());
+  });
+});
+
+Deno.test("advance() jumps the internal state forward or backward the relevant number of steps", () => {
+  const pcg = new Pcg32(0n);
+  const { state } = pcg;
+  // deno-lint-ignore camelcase deno-style-guide/naming-convention
+  const u32_0 = pcg.nextUint32();
+
+  assertEquals(pcg.advance(-1n).nextUint32(), u32_0);
+
+  for (let i = 0; i < 999; ++i) {
+    pcg.step();
+  }
+  // deno-lint-ignore camelcase deno-style-guide/naming-convention
+  const u32_1000 = pcg.nextUint32();
+
+  // reset to initial state
+  pcg.state = state;
+
+  assertEquals(pcg.advance(1000n).nextUint32(), u32_1000);
+  assertEquals(pcg.advance(-1001n).nextUint32(), u32_0);
+});
