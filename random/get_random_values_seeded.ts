@@ -1,6 +1,6 @@
 // Copyright 2018-2025 the Deno authors. MIT license.
 // This module is browser compatible.
-import { Pcg32 } from "./_pcg32.ts";
+import { Pcg32 } from "./pcg_32.ts";
 import type { RandomValueGenerator } from "./_types.ts";
 export type { IntegerTypedArray, RandomValueGenerator } from "./_types.ts";
 

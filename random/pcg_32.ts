@@ -8,13 +8,44 @@ import type { IntegerTypedArray } from "./_types.ts";
 const b4 = new Uint8Array(4);
 const dv4 = new DataView(b4.buffer);
 
-abstract class Prng32 {
-  /** Generates a pseudo-random 32-bit unsigned integer. */
+/**
+ * A pseudo-random number generator that generates 32-bit unsigned integers.
+ *
+ * @example Usage
+ * ```ts no-assert ignore
+ * import { Prng32 } from "@std/random";
+ *
+ * class MyPrng extends Prng32 {
+ *  nextUint32(): number {
+ *    // Implement 32-bit uint generation logic here
+ *  }
+ * }
+ * ```
+ */
+export abstract class Prng32 {
+  /**
+   * Generates a pseudo-random 32-bit unsigned integer.
+   * @returns The generated pseudo-random 32-bit unsigned integer.
+   */
   abstract nextUint32(): number;
 
   /**
    * Mutates the provided typed array with pseudo-random values.
-   * @returns The same typed array, now populated with random values.
+   * @typeParam T - The type of the integer typed array.
+   * @param arr An integer typed array
+   * @returns The same typed array `arr`, now populated with random values.
+   *
+   * @example Usage
+   * ```ts
+   * import { Pcg32 } from "@std/random";
+   * import { assert, assertEquals } from "@std/assert";
+   *
+   * const prng = new Pcg32(1644304675764660139n);
+   * const u8 = new Uint8Array(10);
+   * const values = prng.getRandomValues(u8);
+   * assert(values === u8);
+   * assertEquals([...values], [177, 144, 176, 110, 241, 123, 190, 143, 1, 150]);
+   * ```
    */
   getRandomValues<T extends IntegerTypedArray>(arr: T): T {
     const { buffer, byteLength, byteOffset } = arr;
@@ -58,31 +89,40 @@ const CUR_PLUS = 3 as VarIndex;
 const DELTA = 4 as VarIndex;
 
 /**
- * Internal PCG32 implementation, used by both the public seeded random
- * function and the seed generation algorithm.
+ * PCG32 seeded pseudo-random number generator.
  *
- * Modified from https://github.com/rust-random/rand/blob/f7bbcca/rand_pcg/src/pcg64.rs#L140-L153
+ * @example Usage
+ * ```ts
+ * import { Pcg32 } from "@std/random";
+ * import { assertEquals } from "@std/assert";
+ *
+ * const prng = new Pcg32(1644304675764660139n);
+ * assertEquals(prng.nextUint32(), 1857065137);
+ * ```
  */
+// See https://github.com/rust-random/rand/blob/f7bbcca/rand_pcg/src/pcg64.rs#L140-L153
 export class Pcg32 extends Prng32 {
   /** Multiplier for the PCG32 algorithm. */
   // deno-lint-ignore deno-style-guide/naming-convention
   static readonly MULTIPLIER = 6364136223846793005n;
   // Constants are for 64-bit state, 32-bit output
   // deno-lint-ignore deno-style-guide/naming-convention
-  static readonly ROTATE = 59n; // 64 - 5
+  static readonly #ROTATE = 59n; // 64 - 5
   // deno-lint-ignore deno-style-guide/naming-convention
-  static readonly XSHIFT = 18n; // (5 + 32) / 2
+  static readonly #XSHIFT = 18n; // (5 + 32) / 2
   // deno-lint-ignore deno-style-guide/naming-convention
-  static readonly SPARE = 27n; // 64 - 32 - 5
+  static readonly #SPARE = 27n; // 64 - 32 - 5
 
   #state = new BigUint64Array(2);
-  get state() {
+  /** The state of the generator */
+  get state(): bigint {
     return this.#state[0]!;
   }
   set state(val) {
     this.#state[0] = val;
   }
-  get increment() {
+  /** The increment value used in the generator */
+  get increment(): bigint {
     return this.#state[1]!;
   }
   set #increment(val: bigint) {
@@ -107,6 +147,7 @@ export class Pcg32 extends Prng32 {
    * > However, this constructor can be useful for resuming from a saved state.
    */
   constructor({ state, increment }: { state: bigint; increment: bigint });
+  /** implementation */
   constructor(arg: bigint | { state: bigint; increment: bigint }) {
     if (typeof arg === "bigint") {
       const pcg = Pcg32.#seedFromUint64(arg);
@@ -119,19 +160,43 @@ export class Pcg32 extends Prng32 {
     this.#increment = arg.increment;
   }
 
-  /** @returns The next pseudo-random 32-bit integer. */
+  /**
+   * Generates the next pseudo-random 32-bit unsigned integer.
+   * @returns The next pseudo-random 32-bit unsigned integer.
+   *
+   * @example Usage
+   * ```ts
+   * import { Pcg32 } from "@std/random";
+   * import { assertEquals } from "@std/assert";
+   *
+   * const prng = new Pcg32(1644304675764660139n);
+   * assertEquals(prng.nextUint32(), 1857065137);
+   * ```
+   */
   nextUint32(): number {
     // Output function XSH RR: xorshift high (bits), followed by a random rotate
-    const rot = this.state >> Pcg32.ROTATE;
+    const rot = this.state >> Pcg32.#ROTATE;
     const xsh = BigInt.asUintN(
       32,
-      (this.state >> Pcg32.XSHIFT ^ this.state) >> Pcg32.SPARE,
+      (this.state >> Pcg32.#XSHIFT ^ this.state) >> Pcg32.#SPARE,
     );
     this.step();
     return Number(this.#rotateRightUint32(xsh, rot));
   }
 
-  /** Mutates `pcg` by advancing `pcg.state`. */
+  /**
+   * Mutates `pcg` by advancing `pcg.state`.
+   * @returns `this`
+   *
+   * @example Usage
+   * ```ts
+   * import { Pcg32 } from "@std/random";
+   * import { assertEquals } from "@std/assert";
+   *
+   * const prng = new Pcg32(1644304675764660139n);
+   * assertEquals(prng.step().nextUint32(), 2411625457);
+   * ```
+   */
   step(): this {
     this.state = this.state * Pcg32.MULTIPLIER + this.increment;
     return this;
@@ -147,10 +212,19 @@ export class Pcg32 extends Prng32 {
   /**
    * Multi-step advance (jump-ahead, jump-back)
    * @param delta The number of steps to advance. Negative values are allowed.
+   * @returns `this`
    *
-   * See https://github.com/rust-random/rand/blob/f7bbcca/rand_pcg/src/pcg64.rs#L60
+   * @example Usage
+   * ```ts
+   * import { Pcg32 } from "@std/random";
+   * import { assertEquals } from "@std/assert";
+   *
+   * const prng = new Pcg32(1644304675764660139n);
+   * assertEquals(prng.advance(1000n).nextUint32(), 298923276);
+   * ```
    */
-  advance(delta: bigint) {
+  // See https://github.com/rust-random/rand/blob/f7bbcca/rand_pcg/src/pcg64.rs#L60
+  advance(delta: bigint): this {
     vars[ACC_MULT] = 1n;
     vars[ACC_PLUS] = 0n;
     vars[CUR_MULT] = Pcg32.MULTIPLIER;

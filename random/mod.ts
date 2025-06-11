@@ -23,6 +23,7 @@ export * from "./between.ts";
 export * from "./integer_between.ts";
 export * from "./get_random_values_seeded.ts";
 export * from "./next_float_64.ts";
+export * from "./pcg_32.ts";
 export * from "./sample.ts";
 export * from "./seeded.ts";
 export * from "./shuffle.ts";
