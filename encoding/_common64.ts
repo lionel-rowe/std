@@ -3,11 +3,14 @@
 import type { Uint8Array_ } from "./_types.ts";
 export type { Uint8Array_ };
 
+const encoder = new TextEncoder();
+const WHITE_SPACE = new Set(encoder.encode("\t\n\f\r "));
+
 export const padding = "=".charCodeAt(0);
 export const alphabet: Record<Base64Alphabet, Uint8Array> = {
-  base64: new TextEncoder()
+  base64: encoder
     .encode("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"),
-  base64url: new TextEncoder()
+  base64url: encoder
     .encode("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"),
 };
 export const rAlphabet: Record<Base64Alphabet, Uint8Array> = {
@@ -87,6 +90,8 @@ export function encode(
   return o;
 }
 
+const chunk = new Uint8Array(4);
+
 export function decode(
   buffer: Uint8Array_,
   i: number,
@@ -94,66 +99,81 @@ export function decode(
   alphabet: Uint8Array,
   padding: number,
 ): number {
-  for (let x = buffer.length - 2; x < buffer.length; ++x) {
-    if (buffer[x] === padding) {
-      for (let y = x + 1; y < buffer.length; ++y) {
-        if (buffer[y] !== padding) {
-          throw new TypeError(
-            `Cannot decode input as base64: Invalid character (${
-              String.fromCharCode(buffer[y]!)
-            })`,
-          );
-        }
-      }
-      buffer = buffer.subarray(0, x);
-      break;
-    }
-  }
-  if ((buffer.length - o) % 4 === 1) {
-    throw new RangeError(
-      `Cannot decode input as base64: Length (${
-        buffer.length - o
-      }), excluding padding, must not have a remainder of 1 when divided by 4`,
-    );
-  }
+  let expectedPaddingLength = 0;
 
-  i += 3;
-  for (; i < buffer.length; i += 4) {
-    const x = (getByte(buffer[i - 3]!, alphabet) << 18) |
-      (getByte(buffer[i - 2]!, alphabet) << 12) |
-      (getByte(buffer[i - 1]!, alphabet) << 6) |
-      getByte(buffer[i]!, alphabet);
+  chunks: while (true) {
+    for (let j = 0; j < 4; ++j) {
+      while (WHITE_SPACE.has(buffer[i]!)) ++i;
+
+      if (i === buffer.length || buffer[i]! === padding) {
+        switch (j) {
+          case 3: {
+            const x = (chunk[0]! << 18) | (chunk[1]! << 12) | (chunk[2]! << 6);
+            buffer[o++] = x >> 16;
+            buffer[o++] = x >> 8 & 0xFF;
+            expectedPaddingLength = 1;
+            break;
+          }
+          case 2: {
+            const x = (chunk[0]! << 18) | (chunk[1]! << 12);
+            buffer[o++] = x >> 16;
+            expectedPaddingLength = 2;
+            break;
+          }
+          case 1: {
+            throw new RangeError(
+              `Cannot decode input as base64: Length (${i}), excluding padding, must not have a remainder of 1 when divided by 4`,
+            );
+          }
+        }
+
+        break chunks;
+      }
+
+      const char = buffer[i++]!;
+
+      const byte = alphabet[char] ?? 64;
+      if (byte === 64) { // alphabet.Base64.length
+        throw new TypeError(
+          `Cannot decode input as base64: Invalid character (${
+            String.fromCharCode(char)
+          })`,
+        );
+      }
+
+      chunk[j] = byte;
+    }
+
+    const x = (chunk[0]! << 18) | (chunk[1]! << 12) | (chunk[2]! << 6) |
+      chunk[3]!;
     buffer[o++] = x >> 16;
     buffer[o++] = x >> 8 & 0xFF;
     buffer[o++] = x & 0xFF;
   }
-  switch (i) {
-    case buffer.length + 1: {
-      const x = (getByte(buffer[i - 3]!, alphabet) << 18) |
-        (getByte(buffer[i - 2]!, alphabet) << 12);
-      buffer[o++] = x >> 16;
-      break;
-    }
-    case buffer.length: {
-      const x = (getByte(buffer[i - 3]!, alphabet) << 18) |
-        (getByte(buffer[i - 2]!, alphabet) << 12) |
-        (getByte(buffer[i - 1]!, alphabet) << 6);
-      buffer[o++] = x >> 16;
-      buffer[o++] = x >> 8 & 0xFF;
-      break;
-    }
-  }
-  return o;
-}
 
-function getByte(char: number, alphabet: Uint8Array): number {
-  const byte = alphabet[char] ?? 64;
-  if (byte === 64) { // alphabet.Base64.length
+  const hasPadding = () => {
+    while (WHITE_SPACE.has(buffer[i]!)) ++i;
+
+    if (i === buffer.length) return false;
+
+    const char = buffer[i++]!;
+
+    if (char === padding) return true;
     throw new TypeError(
       `Cannot decode input as base64: Invalid character (${
         String.fromCharCode(char)
       })`,
     );
+  };
+
+  let paddingLength = 0;
+  while (hasPadding()) ++paddingLength;
+
+  if (paddingLength && paddingLength !== expectedPaddingLength) {
+    throw new RangeError(
+      `Cannot decode input as base64: Expected ${expectedPaddingLength} padding characters, but found ${paddingLength}`,
+    );
   }
-  return byte;
+
+  return o;
 }

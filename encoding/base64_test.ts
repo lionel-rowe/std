@@ -43,3 +43,11 @@ Deno.test("decodeBase64() decodes binary", () => {
     assertEquals(outputBinary, input);
   }
 });
+
+Deno.test("decodeBase64() ignores white space", () => {
+  for (const [input, output] of testsetBinary) {
+    const spaced = [...output].join(" ");
+    const outputBinary = decodeBase64(spaced);
+    assertEquals(outputBinary, input);
+  }
+});
