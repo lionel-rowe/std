@@ -3,13 +3,20 @@
 import { AssertionError } from "./assertion_error.ts";
 
 /**
- * Use this to stub out methods that will throw when invoked.
+ * Use this to stub out methods or functions that will throw when invoked.
  *
  * @example Usage
  * ```ts ignore
  * import { unimplemented } from "@std/assert";
  *
- * unimplemented(); // Throws
+ * class Calculator {
+ *   add(a: number, b: number): number {
+ *     return a + b;
+ *   }
+ *   subtract(a: number, b: number): number {
+ *     unimplemented("TODO implement subtract method");
+ *   }
+ * }
  * ```
  *
  * @param msg Optional message to include in the error.
